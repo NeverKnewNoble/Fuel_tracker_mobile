@@ -1,16 +1,126 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:fuel_tracker/frappe_API/config.dart';
 import 'package:intl/intl.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 
-class FuelUsedPage extends StatelessWidget {
+class FuelUsedPage extends StatefulWidget {
+  const FuelUsedPage({super.key});
+
+  @override
+  State<FuelUsedPage> createState() => _FuelUsedPageState();
+}
+
+class _FuelUsedPageState extends State<FuelUsedPage> {
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
   final TextEditingController _dateController = TextEditingController();
-  final TextEditingController fuelTankerController = TextEditingController();
-  final TextEditingController resourceController = TextEditingController();
-  final TextEditingController siteController = TextEditingController();
   final TextEditingController fuelUsedController = TextEditingController();
   final TextEditingController requisitionNumberController = TextEditingController();
 
-  FuelUsedPage({super.key});
+  String? selectedFuelTanker;
+  String? selectedResource;
+  String? selectedSite;
+
+  List<String> fuelTankers = [];
+  List<String> resources = [];
+  List<String> sites = [];
+
+  @override
+  void initState() {
+    super.initState();
+    fetchFuelTankers();
+    fetchResources();
+    fetchSites();
+  }
+
+  Future<void> fetchFuelTankers() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/v2/method/fuel_tracker.api.fuel_used.get_fuel_tankers'),
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['data']['status'] == 'success') {
+          setState(() {
+            fuelTankers = List<String>.from(data['data']['data'].map((e) => e['name']));
+          });
+          if (kDebugMode) {
+            print('Fuel Tankers fetched: $fuelTankers');
+          }
+        }
+      } else {
+        if (kDebugMode) {
+          print('Failed to fetch Fuel Tankers. Status Code: ${response.statusCode}');
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('Error fetching Fuel Tankers: $e');
+      }
+    }
+  }
+
+  Future<void> fetchResources() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/v2/method/fuel_tracker.api.fuel_used.get_filtered_items'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Basic ${base64Encode(utf8.encode(apiKeyApiSecret))}',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final resourcesData = data['data']['data'];
+        setState(() {
+          resources = List<String>.from(resourcesData.map((e) => e['item_name']));
+        });
+        if (kDebugMode) {
+          print('Resources fetched: $resources');
+        }
+      } else {
+        if (kDebugMode) {
+          print('Failed to fetch Resources. Status Code: ${response.statusCode}');
+          print('Response Body: ${response.body}');
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('Error fetching Resources: $e');
+      }
+    }
+  }
+
+
+  Future<void> fetchSites() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/v2/method/fuel_tracker.api.fuel_used.get_site'),
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['data']['status'] == 'success') {
+          setState(() {
+            sites = List<String>.from(data['data']['data'].map((e) => e['site_name']));
+          });
+          if (kDebugMode) {
+            print('Sites fetched: $sites');
+          }
+        }
+      } else {
+        if (kDebugMode) {
+          print('Failed to fetch Sites. Status Code: ${response.statusCode}');
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('Error fetching Sites: $e');
+      }
+    }
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -64,46 +174,76 @@ class FuelUsedPage extends StatelessWidget {
                   },
                 ),
                 const SizedBox(height: 16),
-                TextFormField(
-                  controller: fuelTankerController,
+                DropdownButtonFormField<String>(
+                  value: selectedFuelTanker,
                   decoration: const InputDecoration(
                     labelText: 'Fuel Tanker',
-                    hintText: 'Enter fuel tanker',
                     border: OutlineInputBorder(),
                   ),
+                  items: fuelTankers
+                      .map((tanker) => DropdownMenuItem(
+                            value: tanker,
+                            child: Text(tanker),
+                          ))
+                      .toList(),
+                  onChanged: (value) {
+                    setState(() {
+                      selectedFuelTanker = value;
+                    });
+                  },
                   validator: (value) {
                     if (value == null || value.isEmpty) {
-                      return 'Please enter the fuel tanker';
+                      return 'Please select a fuel tanker';
                     }
                     return null;
                   },
                 ),
                 const SizedBox(height: 16),
-                TextFormField(
-                  controller: resourceController,
+                DropdownButtonFormField<String>(
+                  value: selectedResource,
                   decoration: const InputDecoration(
                     labelText: 'Resource',
-                    hintText: 'Enter resource',
                     border: OutlineInputBorder(),
                   ),
+                  items: resources
+                      .map((resource) => DropdownMenuItem(
+                            value: resource,
+                            child: Text(resource),
+                          ))
+                      .toList(),
+                  onChanged: (value) {
+                    setState(() {
+                      selectedResource = value;
+                    });
+                  },
                   validator: (value) {
                     if (value == null || value.isEmpty) {
-                      return 'Please enter the resource';
+                      return 'Please select a resource';
                     }
                     return null;
                   },
                 ),
                 const SizedBox(height: 16),
-                TextFormField(
-                  controller: siteController,
+                DropdownButtonFormField<String>(
+                  value: selectedSite,
                   decoration: const InputDecoration(
                     labelText: 'Site',
-                    hintText: 'Enter site',
                     border: OutlineInputBorder(),
                   ),
+                  items: sites
+                      .map((site) => DropdownMenuItem(
+                            value: site,
+                            child: Text(site),
+                          ))
+                      .toList(),
+                  onChanged: (value) {
+                    setState(() {
+                      selectedSite = value;
+                    });
+                  },
                   validator: (value) {
                     if (value == null || value.isEmpty) {
-                      return 'Please enter the site';
+                      return 'Please select a site';
                     }
                     return null;
                   },
@@ -148,9 +288,9 @@ class FuelUsedPage extends StatelessWidget {
                         final newDocument = {
                           'name': 'FU-${DateTime.now().millisecondsSinceEpoch % 100000}',
                           'date': _dateController.text,
-                          'fuel_tanker': fuelTankerController.text,
-                          'resource': resourceController.text,
-                          'site': siteController.text,
+                          'fuel_tanker': selectedFuelTanker,
+                          'resource': selectedResource,
+                          'site': selectedSite,
                           'fuel_used': fuelUsedController.text,
                           'requisition_number': requisitionNumberController.text,
                           'status': 'Pending',
