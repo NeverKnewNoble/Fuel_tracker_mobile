@@ -26,6 +26,11 @@ class _FuelUsedPageState extends State<FuelUsedPage> {
   List<String> resources = [];
   List<String> sites = [];
 
+  // Persistent cache for offline usage
+  static List<String> cachedFuelTankers = [];
+  static List<String> cachedResources = [];
+  static List<String> cachedSites = [];
+
   @override
   void initState() {
     super.initState();
@@ -44,17 +49,25 @@ class _FuelUsedPageState extends State<FuelUsedPage> {
         if (data['data']['status'] == 'success') {
           setState(() {
             fuelTankers = List<String>.from(data['data']['data'].map((e) => e['name']));
+            cachedFuelTankers = List<String>.from(fuelTankers); // Cache the response
           });
           if (kDebugMode) {
             print('Fuel Tankers fetched: $fuelTankers');
           }
         }
       } else {
+        // Use cached data if request fails
+        setState(() {
+          fuelTankers = List<String>.from(cachedFuelTankers);
+        });
         if (kDebugMode) {
           print('Failed to fetch Fuel Tankers. Status Code: ${response.statusCode}');
         }
       }
     } catch (e) {
+      setState(() {
+        fuelTankers = List<String>.from(cachedFuelTankers);
+      });
       if (kDebugMode) {
         print('Error fetching Fuel Tankers: $e');
       }
@@ -76,23 +89,30 @@ class _FuelUsedPageState extends State<FuelUsedPage> {
         final resourcesData = data['data']['data'];
         setState(() {
           resources = List<String>.from(resourcesData.map((e) => e['item_name']));
+          cachedResources = List<String>.from(resources); // Cache the response
         });
         if (kDebugMode) {
           print('Resources fetched: $resources');
         }
       } else {
+        // Use cached data if request fails
+        setState(() {
+          resources = List<String>.from(cachedResources);
+        });
         if (kDebugMode) {
           print('Failed to fetch Resources. Status Code: ${response.statusCode}');
           print('Response Body: ${response.body}');
         }
       }
     } catch (e) {
+      setState(() {
+        resources = List<String>.from(cachedResources);
+      });
       if (kDebugMode) {
         print('Error fetching Resources: $e');
       }
     }
   }
-
 
   Future<void> fetchSites() async {
     try {
@@ -104,23 +124,30 @@ class _FuelUsedPageState extends State<FuelUsedPage> {
         if (data['data']['status'] == 'success') {
           setState(() {
             sites = List<String>.from(data['data']['data'].map((e) => e['site_name']));
+            cachedSites = List<String>.from(sites); // Cache the response
           });
           if (kDebugMode) {
             print('Sites fetched: $sites');
           }
         }
       } else {
+        // Use cached data if request fails
+        setState(() {
+          sites = List<String>.from(cachedSites);
+        });
         if (kDebugMode) {
           print('Failed to fetch Sites. Status Code: ${response.statusCode}');
         }
       }
     } catch (e) {
+      setState(() {
+        sites = List<String>.from(cachedSites);
+      });
       if (kDebugMode) {
         print('Error fetching Sites: $e');
       }
     }
   }
-
 
   @override
   Widget build(BuildContext context) {

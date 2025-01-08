@@ -1,4 +1,3 @@
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:fuel_tracker/frappe_API/login_api.dart';
@@ -19,6 +18,10 @@ class LoginPageState extends State<LoginPage> {
 
   static const _emailRegExp = r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$';
 
+  // Persistent cache for authentication response
+  static Map<String, dynamic> cachedAuthResponse = {};
+  bool isCachedLoginUsed = false;
+
   @override
   void dispose() {
     _emailController.dispose();
@@ -33,24 +36,45 @@ class LoginPageState extends State<LoginPage> {
       });
 
       try {
-        // Call the verifyLogin function from login_api.dart
+        // Call the login API
         final response = await verifyLogin(_emailController.text, _passwordController.text);
 
-        if (mounted) {  // Check if the widget is still mounted
-          if (response['status'] == 'success') {
-            // Login successful, navigate to the HomePage
-            if (kDebugMode) {
-              print(response['message']);
-            }
-            Navigator.pushReplacementNamed(context, '/home');
-          } else {
-            // Show error message from the API response
-            _showErrorMessage(response['message']);
-          }
+        if (!mounted) return; // Guard against using context after widget disposal
+
+        if (response['status'] == 'success') {
+          // Cache the authentication response
+          cachedAuthResponse = {
+            'email': _emailController.text,
+            'password': _passwordController.text,
+            'token': response['token'], // Assuming token is part of the response
+          };
+          isCachedLoginUsed = false;
+
+          // Navigate to the HomePage
+          Navigator.pushReplacementNamed(context, '/home');
+        } else {
+          _showErrorMessage(response['message']);
         }
       } catch (e) {
-        // Handle any exceptions or errors during the API call
-        if (mounted) {
+        // Handle failure and attempt cached login
+        if (!mounted) return; // Guard against using context after widget disposal
+
+        if (cachedAuthResponse.isNotEmpty) {
+          if (cachedAuthResponse['email'] == _emailController.text &&
+              cachedAuthResponse['password'] == _passwordController.text) {
+            setState(() {
+              isCachedLoginUsed = true;
+            });
+
+            // Navigate to the HomePage using cached credentials
+            Navigator.pushReplacementNamed(context, '/home');
+            if (kDebugMode) {
+              print('Login succeeded using cached credentials.');
+            }
+          } else {
+            _showErrorMessage('Invalid credentials and failed to log in.');
+          }
+        } else {
           _showErrorMessage('Failed to log in. Please try again.');
         }
       } finally {
@@ -64,9 +88,11 @@ class LoginPageState extends State<LoginPage> {
   }
 
   void _showErrorMessage(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    }
   }
 
   @override
@@ -98,8 +124,8 @@ class LoginPageState extends State<LoginPage> {
               child: Text(
                 'Ex-Fuel Tracker',
                 style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                  color: Colors.white,
-                ),
+                      color: Colors.white,
+                    ),
               ),
             ),
           ),
@@ -129,9 +155,9 @@ class LoginPageState extends State<LoginPage> {
             Text(
               'Login',
               style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                color: Colors.blue,
-                fontWeight: FontWeight.bold,
-              ),
+                    color: Colors.blue,
+                    fontWeight: FontWeight.bold,
+                  ),
               textAlign: TextAlign.left,
             ),
             const SizedBox(height: 5),
@@ -197,6 +223,15 @@ class LoginPageState extends State<LoginPage> {
                     ),
                   ),
                 ),
+          if (isCachedLoginUsed)
+            const Padding(
+              padding: EdgeInsets.only(top: 16.0),
+              child: Text(
+                'Logged in using cached credentials.',
+                style: TextStyle(color: Colors.orange, fontStyle: FontStyle.italic),
+                textAlign: TextAlign.center,
+              ),
+            ),
         ],
       ),
     );
