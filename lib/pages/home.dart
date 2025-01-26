@@ -5,6 +5,7 @@ import 'package:fuel_tracker/pages/fuel_used.dart';
 import 'package:fuel_tracker/pages/login.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart'; // Add this import
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -23,10 +24,35 @@ class HomePageState extends State<HomePage> {
   // In-memory cache for storing the last successful API response
   Map<String, dynamic> lastSuccessfulResponse = {};
 
+  // Key for storing documents in SharedPreferences
+  static const String _documentsKey = 'saved_documents';
+
   @override
   void initState() {
     super.initState();
-    documentCount = documents.length; // Initialize document count
+    _loadDocuments(); // Load documents when the app starts
+  }
+
+  // Load documents from SharedPreferences
+  Future<void> _loadDocuments() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedDocuments = prefs.getStringList(_documentsKey);
+
+    if (savedDocuments != null) {
+      setState(() {
+        documents = savedDocuments
+            .map((doc) => Map<String, String>.from(jsonDecode(doc)))
+            .toList();
+        documentCount = documents.length;
+      });
+    }
+  }
+
+  // Save documents to SharedPreferences
+  Future<void> _saveDocuments() async {
+    final prefs = await SharedPreferences.getInstance();
+    final documentsJson = documents.map((doc) => jsonEncode(doc)).toList();
+    await prefs.setStringList(_documentsKey, documentsJson);
   }
 
   void _addNewDocument(Map<String, String?> document) {
@@ -43,6 +69,7 @@ class HomePageState extends State<HomePage> {
       });
       documentCount++;
     });
+    _saveDocuments(); // Save documents after adding a new one
     _postDocumentToServer(documents.last);
   }
 
@@ -76,12 +103,13 @@ class HomePageState extends State<HomePage> {
           setState(() {
             document['status'] = 'Sent';
           });
-          // Cache the response for future use
           lastSuccessfulResponse = responseData;
+          _saveDocuments(); // Save documents after updating status
         } else {
           setState(() {
             document['status'] = 'Failed';
           });
+          _saveDocuments(); // Save documents after updating status
         }
       } else {
         _handleFailedRequest(document);
@@ -98,15 +126,16 @@ class HomePageState extends State<HomePage> {
     setState(() {
       document['status'] = 'Failed';
     });
+    _saveDocuments(); // Save documents after updating status
 
     if (lastSuccessfulResponse.isNotEmpty) {
       if (kDebugMode) {
         print('Using cached response for the failed request: $lastSuccessfulResponse');
       }
-      // Process the cached response
       setState(() {
         document['status'] = 'Sent (from cache)';
       });
+      _saveDocuments(); // Save documents after updating status
     }
   }
 
@@ -114,6 +143,7 @@ class HomePageState extends State<HomePage> {
     setState(() {
       document['status'] = 'Pending';
     });
+    _saveDocuments(); // Save documents after updating status
     _postDocumentToServer(document);
   }
 
