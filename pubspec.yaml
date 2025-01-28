@@ -37,6 +37,8 @@ dependencies:
   http: ^1.2.2
   intl: ^0.20.1
   shared_preferences: ^2.2.2
+  flutter_launcher_icons: "^0.14.3"
+  flutter_native_splash: ^2.4.4
 
 dev_dependencies:
   flutter_test:
@@ -90,3 +92,25 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+
+
+
+# ? Icons Stuff
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: images/res/mipmap-xxxhdpi/tracker.png
+  min_sdk_android: 21 # android min sdk min:16, default 21
+
+
+
+# ? splash screen stuff
+flutter_native_splash:
+  color: "#FFFFFF"
+  android_12:
+    image: images/960.png # Use the new 960x960 icon here
+    # icon_background_color: "#FFFFFF" # Adjust the background color if necessary
+  android_gravity: center
+  ios_content_mode: scaleAspectFit
+  fullscreen: true

@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:fuel_tracker/frappe_API/login_api.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:fuel_tracker/frappe_API/login_api.dart'; // Adjust import as needed
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -23,11 +24,45 @@ class LoginPageState extends State<LoginPage> {
   bool isCachedLoginUsed = false;
 
   @override
+  void initState() {
+    super.initState();
+    _loadCachedCredentials();
+  }
+
+  @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
+
+  // Load cached credentials from shared_preferences
+  void _loadCachedCredentials() async {
+    final prefs = await SharedPreferences.getInstance();
+    final cachedEmail = prefs.getString('cachedEmail');
+    final cachedPassword = prefs.getString('cachedPassword');
+
+    if (cachedEmail != null && cachedPassword != null) {
+      setState(() {
+        _emailController.text = cachedEmail;
+        _passwordController.text = cachedPassword;
+      });
+    }
+  }
+
+  // Save credentials to shared_preferences
+  Future<void> _saveCredentials(String email, String password) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('cachedEmail', email);
+    await prefs.setString('cachedPassword', password);
+  }
+
+  // Clear cached credentials from shared_preferences
+  // Future<void> _clearCredentials() async {
+  //   final prefs = await SharedPreferences.getInstance();
+  //   await prefs.remove('cachedEmail');
+  //   await prefs.remove('cachedPassword');
+  // }
 
   void _onLogin() async {
     if (_formKey.currentState!.validate()) {
@@ -50,6 +85,9 @@ class LoginPageState extends State<LoginPage> {
           };
           isCachedLoginUsed = false;
 
+          // Save credentials to shared_preferences
+          await _saveCredentials(_emailController.text, _passwordController.text);
+
           // Navigate to the HomePage
           Navigator.pushReplacementNamed(context, '/home');
         } else {
@@ -59,9 +97,12 @@ class LoginPageState extends State<LoginPage> {
         // Handle failure and attempt cached login
         if (!mounted) return; // Guard against using context after widget disposal
 
-        if (cachedAuthResponse.isNotEmpty) {
-          if (cachedAuthResponse['email'] == _emailController.text &&
-              cachedAuthResponse['password'] == _passwordController.text) {
+        final prefs = await SharedPreferences.getInstance();
+        final cachedEmail = prefs.getString('cachedEmail');
+        final cachedPassword = prefs.getString('cachedPassword');
+
+        if (cachedEmail != null && cachedPassword != null) {
+          if (cachedEmail == _emailController.text && cachedPassword == _passwordController.text) {
             setState(() {
               isCachedLoginUsed = true;
             });

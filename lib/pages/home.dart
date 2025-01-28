@@ -1,11 +1,12 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:fuel_tracker/frappe_API/config.dart';
+import 'package:fuel_tracker/pages/fuel_info.dart';
 import 'package:fuel_tracker/pages/fuel_used.dart';
 import 'package:fuel_tracker/pages/login.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart'; // Add this import
+import 'package:shared_preferences/shared_preferences.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -65,12 +66,12 @@ class HomePageState extends State<HomePage> {
         'site': document['site'] ?? '',
         'fuel_used': document['fuel_used'] ?? '',
         'requisition_number': document['requisition_number'] ?? '',
-        'status': document['status'] ?? 'Pending',
+        'status': 'Stored, please press sync icon', // Default status
       });
       documentCount++;
     });
     _saveDocuments(); // Save documents after adding a new one
-    _postDocumentToServer(documents.last);
+    _postDocumentToServer(documents.last); // Try to send the document to the server
   }
 
   Future<void> _postDocumentToServer(Map<String, String> document) async {
@@ -101,21 +102,21 @@ class HomePageState extends State<HomePage> {
         final responseData = jsonDecode(response.body)['data'];
         if (responseData['status'] == 'success') {
           setState(() {
-            document['status'] = 'Sent';
+            document['status'] = 'Sent'; // Update status to "Sent"
           });
           lastSuccessfulResponse = responseData;
           _saveDocuments(); // Save documents after updating status
         } else {
           setState(() {
-            document['status'] = 'Failed';
+            document['status'] = 'Failed'; // Update status to "Failed"
           });
           _saveDocuments(); // Save documents after updating status
         }
       } else {
-        _handleFailedRequest(document);
+        _handleFailedRequest(document); // Handle failed request
       }
     } catch (e) {
-      _handleFailedRequest(document);
+      _handleFailedRequest(document); // Handle any errors
       if (kDebugMode) {
         print('Error occurred during POST request: $e');
       }
@@ -124,27 +125,49 @@ class HomePageState extends State<HomePage> {
 
   void _handleFailedRequest(Map<String, String> document) {
     setState(() {
-      document['status'] = 'Failed';
+      document['status'] = 'Stored, please press sync icon'; // Update status to stored
     });
     _saveDocuments(); // Save documents after updating status
-
-    if (lastSuccessfulResponse.isNotEmpty) {
-      if (kDebugMode) {
-        print('Using cached response for the failed request: $lastSuccessfulResponse');
-      }
-      setState(() {
-        document['status'] = 'Sent (from cache)';
-      });
-      _saveDocuments(); // Save documents after updating status
-    }
   }
 
   void _retryPost(Map<String, String> document) {
-    setState(() {
-      document['status'] = 'Pending';
-    });
-    _saveDocuments(); // Save documents after updating status
-    _postDocumentToServer(document);
+    _postDocumentToServer(document); // Retry sending the document
+  }
+
+  void _retryAllPosts() async {
+    for (var document in documents) {
+      if (document['status'] == 'Stored, please press sync icon') {
+        _retryPost(document); // Retry all stored documents
+      }
+    }
+  }
+
+  Future<String> getLatestDocumentName() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/v2/method/fuel_tracker.api.fuel_used.fuel_list'),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['data']['status'] == 'success') {
+          final documents = data['data']['data'];
+          if (documents.isNotEmpty) {
+            final latestDocument = documents
+                .map((doc) => int.parse(doc['name'].split('-')[1]))
+                .reduce((a, b) => a > b ? a : b);
+
+            return 'FU-${(latestDocument + 1).toString().padLeft(5, '0')}';
+          }
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('Error fetching latest document name: $e');
+      }
+    }
+
+    return 'FU-00001'; // Default document name if fetching fails
   }
 
   void _logout() {
@@ -191,9 +214,10 @@ class HomePageState extends State<HomePage> {
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () async {
+          final newDocumentName = await getLatestDocumentName();
           final newDocument = await Navigator.push(
             context,
-            MaterialPageRoute(builder: (context) => const FuelUsedPage()),
+            MaterialPageRoute(builder: (context) => FuelUsedPage(documentName: newDocumentName)),
           );
           if (newDocument != null) {
             _addNewDocument(newDocument);
@@ -236,17 +260,26 @@ class HomePageState extends State<HomePage> {
             child: ListView(
               scrollDirection: Axis.horizontal,
               children: [
-                _buildCard(context, 'Documents Created', documentCount.toString()),
+                _buildCard(context, 'Total Fuel Entries', documentCount.toString()),
               ],
             ),
           ),
           const SizedBox(height: 24),
-          Text(
-            'Documents',
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  color: Colors.blue,
-                  fontWeight: FontWeight.bold,
-                ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Fuel Entries',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      color: Colors.blue,
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.sync, color: Colors.blue),
+                onPressed: _retryAllPosts, // Retry all stored documents
+              ),
+            ],
           ),
           const SizedBox(height: 16),
           Expanded(
@@ -323,11 +356,80 @@ class HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildDocumentItem(BuildContext context, int index) {
-    final document = documents[index];
-    final status = document['status']!;
+  // Widget _buildDocumentItem(BuildContext context, int index) {
+  //   final document = documents[index];
+  //   final status = document['status']!;
 
-    return Container(
+  //   return GestureDetector(
+  //       child:Container(
+  //       margin: const EdgeInsets.symmetric(vertical: 8),
+  //       padding: const EdgeInsets.all(16),
+  //       decoration: BoxDecoration(
+  //         color: Colors.white,
+  //         borderRadius: BorderRadius.circular(8),
+  //         border: Border.all(color: Colors.grey.shade300),
+  //       ),
+  //       child: Row(
+  //         children: [
+  //           const Icon(Icons.description, color: Colors.blue, size: 24),
+  //           const SizedBox(width: 16),
+  //           Expanded(
+  //             child: Column(
+  //               crossAxisAlignment: CrossAxisAlignment.start,
+  //               children: [
+  //                 Text(
+  //                   document['name']!,
+  //                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+  //                 ),
+  //                 const SizedBox(height: 4),
+  //                 Text(
+  //                   'Created: ${document['date']}',
+  //                   style: const TextStyle(color: Colors.grey, fontSize: 14),
+  //                 ),
+  //                 const SizedBox(height: 4),
+  //                 Text(
+  //                   'Status: $status',
+  //                   style: TextStyle(
+  //                     color: status == 'Failed'
+  //                         ? Colors.red
+  //                         : status == 'Sent'
+  //                             ? Colors.green
+  //                             : Colors.blue,
+  //                     fontSize: 14,
+  //                   ),
+  //                 ),
+  //               ],
+  //             ),
+  //           ),
+  //           if (status == 'Stored, please press sync icon')
+  //             ElevatedButton(
+  //               onPressed: () => _retryPost(document), // Retry this document
+  //               style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+  //               child: const Text('Retry', style: TextStyle(color: Colors.white)),
+  //             ),
+  //         ],
+  //       ),
+  //     ),
+  //   );
+  // }
+
+
+
+
+  Widget _buildDocumentItem(BuildContext context, int index) {
+  final document = documents[index];
+  final status = document['status']!;
+
+  return GestureDetector(
+    onTap: () {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => FuelInfoPage(documentName: document['name']!),
+        ),
+      );
+    },
+    child: Container(
       margin: const EdgeInsets.symmetric(vertical: 8),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -360,21 +462,112 @@ class HomePageState extends State<HomePage> {
                         ? Colors.red
                         : status == 'Sent'
                             ? Colors.green
-                            : Colors.orange,
+                            : Colors.blue,
                     fontSize: 14,
                   ),
                 ),
               ],
             ),
           ),
-          if (status == 'Failed')
+          if (status == 'Stored, please press sync icon')
             ElevatedButton(
-              onPressed: () => _retryPost(document),
+              onPressed: () => _retryPost(document), // Retry this document
               style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
               child: const Text('Retry', style: TextStyle(color: Colors.white)),
             ),
         ],
       ),
-    );
-  }
+    ),
+  );
 }
+}
+
+
+
+
+
+
+
+  // Future<void> _deleteDocument(String docname) async {
+  //   try {
+  //     final url = Uri.parse('$baseUrl/api/v2/method/fuel_tracker.api.fuel_used.delete_fuel_used_document');
+  //     final response = await http.post(
+  //       url,
+  //       headers: {
+  //         'Content-Type': 'application/json',
+  //         'Authorization': 'Basic ${base64Encode(utf8.encode(apiKeyApiSecret))}',
+  //       },
+  //       body: jsonEncode({
+  //         'docname': docname,
+  //       }),
+  //     );
+
+  //     if (kDebugMode) {
+  //       print('Response Status Code: ${response.statusCode}');
+  //       print('Response Body: ${response.body}');
+  //     }
+
+  //     if (response.statusCode == 200) {
+  //       setState(() {
+  //         documents.removeWhere((doc) => doc['name'] == docname);
+  //         documentCount = documents.length;
+  //       });
+  //       _saveDocuments(); // Save documents after deletion
+  //     } else {
+  //       if (kDebugMode) {
+  //         print('Failed to delete document: ${response.body}');
+  //       }
+  //     }
+  //   } catch (e) {
+  //     if (kDebugMode) {
+  //       print('Error occurred during DELETE request: $e');
+  //     }
+  //   }
+  // }
+
+
+
+          // if (status == 'Sent') // Show delete icon only for "Sent" status
+          //   IconButton(
+          //     icon: const Icon(Icons.delete, color: Colors.red),
+          //     onPressed: () => _deleteDocument(document['name']!),
+          //   ),
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

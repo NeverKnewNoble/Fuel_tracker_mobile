@@ -6,7 +6,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class FuelUsedPage extends StatefulWidget {
-  const FuelUsedPage({super.key});
+  const FuelUsedPage({super.key, required String documentName});
 
   @override
   State<FuelUsedPage> createState() => _FuelUsedPageState();
@@ -30,6 +30,7 @@ class _FuelUsedPageState extends State<FuelUsedPage> {
   static List<String> cachedFuelTankers = [];
   static List<String> cachedResources = [];
   static List<String> cachedSites = [];
+  static String cachedLatestDocumentName = 'FU-00001';
 
   @override
   void initState() {
@@ -145,6 +146,68 @@ class _FuelUsedPageState extends State<FuelUsedPage> {
       });
       if (kDebugMode) {
         print('Error fetching Sites: $e');
+      }
+    }
+  }
+
+  Future<String> getLatestDocumentName() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/v2/method/fuel_tracker.api.fuel_used.fuel_list'),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['data']['status'] == 'success') {
+          final documents = data['data']['data'];
+          if (documents.isNotEmpty) {
+            // Extract the numeric part of the document names and find the maximum
+            final latestDocument = documents
+                .map((doc) => int.parse(doc['name'].split('-')[1]))
+                .reduce((a, b) => a > b ? a : b);
+
+            cachedLatestDocumentName = 'FU-${(latestDocument + 1).toString().padLeft(5, '0')}';
+            return cachedLatestDocumentName;
+          }
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('Error fetching latest document name: $e');
+      }
+    }
+
+    // Use cached data if request fails
+    return cachedLatestDocumentName;
+  }
+
+  Future<void> createFuelUsedDocument(Map<String, dynamic> document) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/v2/method/fuel_tracker.api.fuel_used.create_fuel_used'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Basic ${base64Encode(utf8.encode(apiKeyApiSecret))}',
+        },
+        body: jsonEncode(document),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['data']['status'] == 'success') {
+          final docName = data['data']['docname'];
+          if (kDebugMode) {
+            print('Document created successfully: $docName');
+          }
+        }
+      } else {
+        if (kDebugMode) {
+          print('Failed to create document. Status Code: ${response.statusCode}');
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('Error creating document: $e');
       }
     }
   }
@@ -310,10 +373,12 @@ class _FuelUsedPageState extends State<FuelUsedPage> {
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: () {
+                    onPressed: () async {
                       if (_formKey.currentState?.validate() ?? false) {
+                        final newDocumentName = await getLatestDocumentName();
+
                         final newDocument = {
-                          'name': 'FU-${DateTime.now().millisecondsSinceEpoch % 100000}',
+                          'name': newDocumentName,
                           'date': _dateController.text,
                           'fuel_tanker': selectedFuelTanker,
                           'resource': selectedResource,
@@ -322,6 +387,9 @@ class _FuelUsedPageState extends State<FuelUsedPage> {
                           'requisition_number': requisitionNumberController.text,
                           'status': 'Pending',
                         };
+
+                        await createFuelUsedDocument(newDocument);
+
                         Navigator.pop(context, newDocument);
                       }
                     },
@@ -343,3 +411,34 @@ class _FuelUsedPageState extends State<FuelUsedPage> {
     );
   }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
