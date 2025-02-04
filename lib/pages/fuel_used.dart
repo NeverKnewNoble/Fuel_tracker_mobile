@@ -4,6 +4,7 @@ import 'package:fuel_tracker/frappe_API/config.dart';
 import 'package:intl/intl.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 class FuelUsedPage extends StatefulWidget {
   const FuelUsedPage({super.key, required String documentName});
@@ -77,11 +78,21 @@ class _FuelUsedPageState extends State<FuelUsedPage> {
 
   Future<void> fetchResources() async {
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final apiKey = prefs.getString('cachedApiKey');
+      final apiSecret = prefs.getString('cachedApiSecret');
+
+      // Combine them in the usual username:password format for Basic auth:
+      final String credentials = '$apiKey:$apiSecret';
+
+      // Now base64-encode the credentials:
+      final String encodedCredentials = base64Encode(utf8.encode(credentials));
+      
       final response = await http.get(
         Uri.parse('$baseUrl/api/v2/method/fuel_tracker.api.fuel_used.get_filtered_items'),
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Basic ${base64Encode(utf8.encode(apiKeyApiSecret))}',
+          'Authorization': 'Basic $encodedCredentials',
         },
       );
 
@@ -183,11 +194,15 @@ class _FuelUsedPageState extends State<FuelUsedPage> {
 
   Future<void> createFuelUsedDocument(Map<String, dynamic> document) async {
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final apiKey = prefs.getString('cachedApiKey');
+      final apiSecret = prefs.getString('cachedApiSecret');
+
       final response = await http.post(
         Uri.parse('$baseUrl/api/v2/method/fuel_tracker.api.fuel_used.create_fuel_used'),
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Basic ${base64Encode(utf8.encode(apiKeyApiSecret))}',
+          'Authorization': 'Basic $apiKey:$apiSecret',
         },
         body: jsonEncode(document),
       );
@@ -411,34 +426,3 @@ class _FuelUsedPageState extends State<FuelUsedPage> {
     );
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

@@ -24,6 +24,8 @@ Future<Map<String, dynamic>> verifyLogin(String email, String password) async {
       return {
         'status': responseData['data']['status'],
         'message': responseData['data']['message'],
+        'api_key': responseData['data']['api_key'],
+        'api_secret': responseData['data']['api_secret'],
       };
     } else {
       // Handle login failure

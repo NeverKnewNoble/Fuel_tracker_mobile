@@ -76,12 +76,26 @@ class HomePageState extends State<HomePage> {
 
   Future<void> _postDocumentToServer(Map<String, String> document) async {
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final apiKey = prefs.getString('cachedApiKey');
+      final apiSecret = prefs.getString('cachedApiSecret');
+
+      if (apiKey == null || apiSecret == null) {
+        throw Exception('API keys not found');
+      }
+
+      // Combine them in the usual username:password format for Basic auth:
+      final String credentials = '$apiKey:$apiSecret';
+
+      // Now base64-encode the credentials:
+      final String encodedCredentials = base64Encode(utf8.encode(credentials));
+
       final url = Uri.parse('$baseUrl/api/v2/method/fuel_tracker.api.fuel_used.fuel_used');
       final response = await http.post(
         url,
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Basic ${base64Encode(utf8.encode(apiKeyApiSecret))}',
+          'Authorization': 'Basic $encodedCredentials',
         },
         body: jsonEncode({
           'date': document['date'] ?? '',
@@ -356,218 +370,69 @@ class HomePageState extends State<HomePage> {
     );
   }
 
-  // Widget _buildDocumentItem(BuildContext context, int index) {
-  //   final document = documents[index];
-  //   final status = document['status']!;
-
-  //   return GestureDetector(
-  //       child:Container(
-  //       margin: const EdgeInsets.symmetric(vertical: 8),
-  //       padding: const EdgeInsets.all(16),
-  //       decoration: BoxDecoration(
-  //         color: Colors.white,
-  //         borderRadius: BorderRadius.circular(8),
-  //         border: Border.all(color: Colors.grey.shade300),
-  //       ),
-  //       child: Row(
-  //         children: [
-  //           const Icon(Icons.description, color: Colors.blue, size: 24),
-  //           const SizedBox(width: 16),
-  //           Expanded(
-  //             child: Column(
-  //               crossAxisAlignment: CrossAxisAlignment.start,
-  //               children: [
-  //                 Text(
-  //                   document['name']!,
-  //                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-  //                 ),
-  //                 const SizedBox(height: 4),
-  //                 Text(
-  //                   'Created: ${document['date']}',
-  //                   style: const TextStyle(color: Colors.grey, fontSize: 14),
-  //                 ),
-  //                 const SizedBox(height: 4),
-  //                 Text(
-  //                   'Status: $status',
-  //                   style: TextStyle(
-  //                     color: status == 'Failed'
-  //                         ? Colors.red
-  //                         : status == 'Sent'
-  //                             ? Colors.green
-  //                             : Colors.blue,
-  //                     fontSize: 14,
-  //                   ),
-  //                 ),
-  //               ],
-  //             ),
-  //           ),
-  //           if (status == 'Stored, please press sync icon')
-  //             ElevatedButton(
-  //               onPressed: () => _retryPost(document), // Retry this document
-  //               style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
-  //               child: const Text('Retry', style: TextStyle(color: Colors.white)),
-  //             ),
-  //         ],
-  //       ),
-  //     ),
-  //   );
-  // }
-
-
-
 
   Widget _buildDocumentItem(BuildContext context, int index) {
-  final document = documents[index];
-  final status = document['status']!;
+    final document = documents[index];
+    final status = document['status']!;
 
-  return GestureDetector(
-    onTap: () {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => FuelInfoPage(documentName: document['name']!),
-        ),
-      );
-    },
-    child: Container(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey.shade300),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.description, color: Colors.blue, size: 24),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  document['name']!,
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Created: ${document['date']}',
-                  style: const TextStyle(color: Colors.grey, fontSize: 14),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Status: $status',
-                  style: TextStyle(
-                    color: status == 'Failed'
-                        ? Colors.red
-                        : status == 'Sent'
-                            ? Colors.green
-                            : Colors.blue,
-                    fontSize: 14,
-                  ),
-                ),
-              ],
-            ),
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => FuelInfoPage(documentName: document['name']!),
           ),
-          if (status == 'Stored, please press sync icon')
-            ElevatedButton(
-              onPressed: () => _retryPost(document), // Retry this document
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
-              child: const Text('Retry', style: TextStyle(color: Colors.white)),
+        );
+      },
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.grey.shade300),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.description, color: Colors.blue, size: 24),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    document['name']!,
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Created: ${document['date']}',
+                    style: const TextStyle(color: Colors.grey, fontSize: 14),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Status: $status',
+                    style: TextStyle(
+                      color: status == 'Failed'
+                          ? Colors.red
+                          : status == 'Sent'
+                              ? Colors.green
+                              : Colors.blue,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
             ),
-        ],
+            if (status == 'Stored, please press sync icon')
+              ElevatedButton(
+                onPressed: () => _retryPost(document), // Retry this document
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+                child: const Text('Retry', style: TextStyle(color: Colors.white)),
+              ),
+          ],
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
-}
-
-
-
-
-
-
-
-  // Future<void> _deleteDocument(String docname) async {
-  //   try {
-  //     final url = Uri.parse('$baseUrl/api/v2/method/fuel_tracker.api.fuel_used.delete_fuel_used_document');
-  //     final response = await http.post(
-  //       url,
-  //       headers: {
-  //         'Content-Type': 'application/json',
-  //         'Authorization': 'Basic ${base64Encode(utf8.encode(apiKeyApiSecret))}',
-  //       },
-  //       body: jsonEncode({
-  //         'docname': docname,
-  //       }),
-  //     );
-
-  //     if (kDebugMode) {
-  //       print('Response Status Code: ${response.statusCode}');
-  //       print('Response Body: ${response.body}');
-  //     }
-
-  //     if (response.statusCode == 200) {
-  //       setState(() {
-  //         documents.removeWhere((doc) => doc['name'] == docname);
-  //         documentCount = documents.length;
-  //       });
-  //       _saveDocuments(); // Save documents after deletion
-  //     } else {
-  //       if (kDebugMode) {
-  //         print('Failed to delete document: ${response.body}');
-  //       }
-  //     }
-  //   } catch (e) {
-  //     if (kDebugMode) {
-  //       print('Error occurred during DELETE request: $e');
-  //     }
-  //   }
-  // }
-
-
-
-          // if (status == 'Sent') // Show delete icon only for "Sent" status
-          //   IconButton(
-          //     icon: const Icon(Icons.delete, color: Colors.red),
-          //     onPressed: () => _deleteDocument(document['name']!),
-          //   ),
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

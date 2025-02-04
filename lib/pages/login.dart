@@ -57,6 +57,7 @@ class LoginPageState extends State<LoginPage> {
     await prefs.setString('cachedPassword', password);
   }
 
+
   // Clear cached credentials from shared_preferences
   // Future<void> _clearCredentials() async {
   //   final prefs = await SharedPreferences.getInstance();
@@ -81,12 +82,14 @@ class LoginPageState extends State<LoginPage> {
           cachedAuthResponse = {
             'email': _emailController.text,
             'password': _passwordController.text,
-            'token': response['token'], // Assuming token is part of the response
+            'api_key': response['api_key'],
+            'api_secret': response['api_secret'],
           };
           isCachedLoginUsed = false;
 
           // Save credentials to shared_preferences
           await _saveCredentials(_emailController.text, _passwordController.text);
+          await _saveApiKeys(response['api_key'], response['api_secret']);
 
           // Navigate to the HomePage
           Navigator.pushReplacementNamed(context, '/home');
@@ -100,8 +103,10 @@ class LoginPageState extends State<LoginPage> {
         final prefs = await SharedPreferences.getInstance();
         final cachedEmail = prefs.getString('cachedEmail');
         final cachedPassword = prefs.getString('cachedPassword');
+        final cachedApiKey = prefs.getString('cachedApiKey');
+        final cachedApiSecret = prefs.getString('cachedApiSecret');
 
-        if (cachedEmail != null && cachedPassword != null) {
+        if (cachedEmail != null && cachedPassword != null && cachedApiKey != null && cachedApiSecret != null) {
           if (cachedEmail == _emailController.text && cachedPassword == _passwordController.text) {
             setState(() {
               isCachedLoginUsed = true;
@@ -126,6 +131,12 @@ class LoginPageState extends State<LoginPage> {
         }
       }
     }
+  }
+
+  Future<void> _saveApiKeys(String apiKey, String apiSecret) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('cachedApiKey', apiKey);
+    await prefs.setString('cachedApiSecret', apiSecret);
   }
 
   void _showErrorMessage(String message) {
