@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:fuel_tracker/pages/home.dart';
 import 'package:fuel_tracker/pages/login.dart';
+import 'package:fuel_tracker/pages/settings.dart';
 import 'package:fuel_tracker/pages/splash.dart';
 
 void main() {
@@ -20,6 +21,7 @@ class MyApp extends StatelessWidget {
         '/': (context) => const SplashScreen(),
         '/login': (context) => const LoginPage(),
         '/home': (context) => HomePage(),
+        '/settings': (context) => const SettingsPage(),
       },
     );
   }

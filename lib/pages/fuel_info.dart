@@ -18,10 +18,13 @@ class _FuelInfoPageState extends State<FuelInfoPage> {
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
   final TextEditingController _dateController = TextEditingController();
   final TextEditingController fuelUsedController = TextEditingController();
-  final TextEditingController requisitionNumberController = TextEditingController();
+  final TextEditingController requisitionNumberController =
+      TextEditingController();
   final TextEditingController fuelTankerController = TextEditingController();
   final TextEditingController resourceController = TextEditingController();
   final TextEditingController siteController = TextEditingController();
+
+  bool _isLoading = true;
 
   @override
   void initState() {
@@ -35,13 +38,11 @@ class _FuelInfoPageState extends State<FuelInfoPage> {
       final apiKey = prefs.getString('cachedApiKey');
       final apiSecret = prefs.getString('cachedApiSecret');
 
-      // Combine them in the usual username:password format for Basic auth:
       final String credentials = '$apiKey:$apiSecret';
-
-      // Now base64-encode the credentials:
       final String encodedCredentials = base64Encode(utf8.encode(credentials));
 
-      final url = Uri.parse('$baseUrl/api/v2/method/fuel_tracker.api.fuel_used.get_all_fuel_used_records');
+      final url = Uri.parse(
+          '$baseUrl/api/v2/method/fuel_tracker.api.fuel_used.get_all_fuel_used_records');
       final response = await http.get(
         url,
         headers: {
@@ -59,14 +60,25 @@ class _FuelInfoPageState extends State<FuelInfoPage> {
         if (document != null) {
           setState(() {
             _populateFormFields(document);
+            _isLoading = false;
+          });
+        } else {
+          setState(() {
+            _isLoading = false;
           });
         }
       } else {
+        setState(() {
+          _isLoading = false;
+        });
         if (kDebugMode) {
           print('Failed to fetch document data: ${response.body}');
         }
       }
     } catch (e) {
+      setState(() {
+        _isLoading = false;
+      });
       if (kDebugMode) {
         print('Error fetching document data: $e');
       }
@@ -85,49 +97,246 @@ class _FuelInfoPageState extends State<FuelInfoPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        title: const Text('Fuel Used Details', style: TextStyle(fontWeight: FontWeight.bold)),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            Navigator.pop(context);
-          },
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color(0xFF1A237E),
+              Color(0xFF3949AB),
+            ],
+          ),
         ),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Form(
-          key: _formKey,
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                buildReadOnlyField(_dateController, 'Date'),
-                buildReadOnlyField(fuelTankerController, 'Fuel Tanker'),
-                buildReadOnlyField(resourceController, 'Resource'),
-                buildReadOnlyField(siteController, 'Site'),
-                buildReadOnlyField(fuelUsedController, 'Fuel Used (LTS)'),
-                buildReadOnlyField(requisitionNumberController, 'Requisition Number'),
-              ],
-            ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              _buildAppBar(context),
+              Expanded(
+                child: Container(
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFF5F6FA),
+                    borderRadius: BorderRadius.only(
+                      topLeft: Radius.circular(30),
+                      topRight: Radius.circular(30),
+                    ),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(30),
+                      topRight: Radius.circular(30),
+                    ),
+                    child: _isLoading ? _buildLoadingState() : _buildContent(),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),
     );
   }
 
-  Widget buildReadOnlyField(TextEditingController controller, String label) {
+  Widget _buildAppBar(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: TextFormField(
-        controller: controller,
-        decoration: InputDecoration(
-          labelText: label,
-          border: const OutlineInputBorder(),
-          suffixIcon: Icon(Icons.lock_outline, color: Colors.grey),
+      padding: const EdgeInsets.fromLTRB(8, 8, 20, 20),
+      child: Row(
+        children: [
+          IconButton(
+            icon: const Icon(Icons.arrow_back_ios, color: Colors.white),
+            onPressed: () => Navigator.pop(context),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  widget.documentName,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Fuel entry details',
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 14,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLoadingState() {
+    return const Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF3949AB)),
+          ),
+          SizedBox(height: 16),
+          Text(
+            'Loading details...',
+            style: TextStyle(
+              color: Color(0xFF3949AB),
+              fontSize: 16,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildContent() {
+    return Form(
+      key: _formKey,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildInfoCard(
+              icon: Icons.calendar_today_outlined,
+              label: 'Date',
+              value: _dateController.text,
+            ),
+            const SizedBox(height: 16),
+            _buildInfoCard(
+              icon: Icons.local_shipping_outlined,
+              label: 'Fuel Tanker',
+              value: fuelTankerController.text,
+            ),
+            const SizedBox(height: 16),
+            _buildInfoCard(
+              icon: Icons.build_outlined,
+              label: 'Resource',
+              value: resourceController.text,
+            ),
+            const SizedBox(height: 16),
+            _buildInfoCard(
+              icon: Icons.location_on_outlined,
+              label: 'Site',
+              value: siteController.text,
+            ),
+            const SizedBox(height: 16),
+            _buildInfoCard(
+              icon: Icons.local_gas_station_outlined,
+              label: 'Fuel Used (LTS)',
+              value: fuelUsedController.text,
+              highlight: true,
+            ),
+            const SizedBox(height: 16),
+            _buildInfoCard(
+              icon: Icons.numbers_outlined,
+              label: 'Requisition Number',
+              value: requisitionNumberController.text,
+            ),
+          ],
         ),
-        readOnly: true,  // Makes the field read-only
+      ),
+    );
+  }
+
+  Widget _buildInfoCard({
+    required IconData icon,
+    required String label,
+    required String value,
+    bool highlight = false,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: highlight
+            ? const Color(0xFF3949AB).withValues(alpha: 0.1)
+            : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: highlight
+              ? const Color(0xFF3949AB).withValues(alpha: 0.3)
+              : Colors.grey.shade200,
+          width: highlight ? 2 : 1,
+        ),
+        boxShadow: highlight
+            ? [
+                BoxShadow(
+                  color: const Color(0xFF3949AB).withValues(alpha: 0.1),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ]
+            : null,
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: highlight
+                  ? const Color(0xFF3949AB).withValues(alpha: 0.15)
+                  : const Color(0xFFF5F6FA),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(
+              icon,
+              color: const Color(0xFF3949AB),
+              size: 24,
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: Colors.grey.shade600,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  value.isEmpty ? 'Not specified' : value,
+                  style: TextStyle(
+                    color: value.isEmpty
+                        ? Colors.grey.shade400
+                        : const Color(0xFF1A237E),
+                    fontSize: 16,
+                    fontWeight: highlight ? FontWeight.bold : FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (highlight)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: const Color(0xFF3949AB),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: const Text(
+                'LTS',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
