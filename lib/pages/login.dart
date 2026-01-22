@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:fuel_tracker/frappe_API/login_api.dart'; // Adjust import as needed
+import 'package:fuel_tracker/frappe_API/login_api.dart' show verifyLogin, LoginException;
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -10,33 +10,60 @@ class LoginPage extends StatefulWidget {
   LoginPageState createState() => LoginPageState();
 }
 
-class LoginPageState extends State<LoginPage> {
+class LoginPageState extends State<LoginPage>
+    with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
   bool _isLoading = false;
 
+  late AnimationController _animationController;
+  late Animation<double> _fadeAnimation;
+  late Animation<Offset> _slideAnimation;
+
   static const _emailRegExp = r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$';
 
-  // Persistent cache for authentication response
   static Map<String, dynamic> cachedAuthResponse = {};
   bool isCachedLoginUsed = false;
 
   @override
   void initState() {
     super.initState();
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
+
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _animationController,
+        curve: Curves.easeOut,
+      ),
+    );
+
+    _slideAnimation = Tween<Offset>(
+      begin: const Offset(0, 0.3),
+      end: Offset.zero,
+    ).animate(
+      CurvedAnimation(
+        parent: _animationController,
+        curve: Curves.easeOutCubic,
+      ),
+    );
+
+    _animationController.forward();
     _loadCachedCredentials();
   }
 
   @override
   void dispose() {
+    _animationController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
 
-  // Load cached credentials from shared_preferences
   void _loadCachedCredentials() async {
     final prefs = await SharedPreferences.getInstance();
     final cachedEmail = prefs.getString('cachedEmail');
@@ -50,20 +77,11 @@ class LoginPageState extends State<LoginPage> {
     }
   }
 
-  // Save credentials to shared_preferences
   Future<void> _saveCredentials(String email, String password) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('cachedEmail', email);
     await prefs.setString('cachedPassword', password);
   }
-
-
-  // Clear cached credentials from shared_preferences
-  // Future<void> _clearCredentials() async {
-  //   final prefs = await SharedPreferences.getInstance();
-  //   await prefs.remove('cachedEmail');
-  //   await prefs.remove('cachedPassword');
-  // }
 
   void _onLogin() async {
     if (_formKey.currentState!.validate()) {
@@ -72,13 +90,12 @@ class LoginPageState extends State<LoginPage> {
       });
 
       try {
-        // Call the login API
-        final response = await verifyLogin(_emailController.text, _passwordController.text);
+        final response =
+            await verifyLogin(_emailController.text, _passwordController.text);
 
-        if (!mounted) return; // Guard against using context after widget disposal
+        if (!mounted) return;
 
         if (response['status'] == 'success') {
-          // Cache the authentication response
           cachedAuthResponse = {
             'email': _emailController.text,
             'password': _passwordController.text,
@@ -87,42 +104,31 @@ class LoginPageState extends State<LoginPage> {
           };
           isCachedLoginUsed = false;
 
-          // Save credentials to shared_preferences
           await _saveCredentials(_emailController.text, _passwordController.text);
           await _saveApiKeys(response['api_key'], response['api_secret']);
 
-          // Navigate to the HomePage
           Navigator.pushReplacementNamed(context, '/home');
         } else {
-          _showErrorMessage(response['message']);
+          _showErrorMessage(response['message'] ?? 'Invalid email or password');
         }
+      } on LoginException catch (e) {
+        if (!mounted) return;
+
+        // For network/timeout errors, try cached credentials
+        if (e.type == 'network' || e.type == 'timeout') {
+          final canUseCached = await _tryUseCachedCredentials();
+          if (canUseCached) return;
+        }
+
+        _showErrorMessage(e.message);
       } catch (e) {
-        // Handle failure and attempt cached login
-        if (!mounted) return; // Guard against using context after widget disposal
+        if (!mounted) return;
 
-        final prefs = await SharedPreferences.getInstance();
-        final cachedEmail = prefs.getString('cachedEmail');
-        final cachedPassword = prefs.getString('cachedPassword');
-        final cachedApiKey = prefs.getString('cachedApiKey');
-        final cachedApiSecret = prefs.getString('cachedApiSecret');
+        // Try cached credentials for any unexpected errors
+        final canUseCached = await _tryUseCachedCredentials();
+        if (canUseCached) return;
 
-        if (cachedEmail != null && cachedPassword != null && cachedApiKey != null && cachedApiSecret != null) {
-          if (cachedEmail == _emailController.text && cachedPassword == _passwordController.text) {
-            setState(() {
-              isCachedLoginUsed = true;
-            });
-
-            // Navigate to the HomePage using cached credentials
-            Navigator.pushReplacementNamed(context, '/home');
-            if (kDebugMode) {
-              print('Login succeeded using cached credentials.');
-            }
-          } else {
-            _showErrorMessage('Invalid credentials and failed to log in.');
-          }
-        } else {
-          _showErrorMessage('Failed to log in. Please try again.');
-        }
+        _showErrorMessage('Something went wrong. Please try again.');
       } finally {
         if (mounted) {
           setState(() {
@@ -131,6 +137,32 @@ class LoginPageState extends State<LoginPage> {
         }
       }
     }
+  }
+
+  Future<bool> _tryUseCachedCredentials() async {
+    final prefs = await SharedPreferences.getInstance();
+    final cachedEmail = prefs.getString('cachedEmail');
+    final cachedPassword = prefs.getString('cachedPassword');
+    final cachedApiKey = prefs.getString('cachedApiKey');
+    final cachedApiSecret = prefs.getString('cachedApiSecret');
+
+    if (cachedEmail != null &&
+        cachedPassword != null &&
+        cachedApiKey != null &&
+        cachedApiSecret != null &&
+        cachedEmail == _emailController.text &&
+        cachedPassword == _passwordController.text) {
+      setState(() {
+        isCachedLoginUsed = true;
+      });
+
+      Navigator.pushReplacementNamed(context, '/home');
+      if (kDebugMode) {
+        print('Login succeeded using cached credentials.');
+      }
+      return true;
+    }
+    return false;
   }
 
   Future<void> _saveApiKeys(String apiKey, String apiSecret) async {
@@ -142,7 +174,15 @@ class LoginPageState extends State<LoginPage> {
   void _showErrorMessage(String message) {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
+        SnackBar(
+          content: Text(message),
+          backgroundColor: Colors.red.shade400,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+          margin: const EdgeInsets.all(16),
+        ),
       );
     }
   }
@@ -150,141 +190,167 @@ class LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            if (constraints.maxWidth > 600) {
-              return _buildWideLayout(context);
-            } else {
-              return _buildNarrowLayout(context);
-            }
-          },
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color(0xFF1A237E),
+              Color(0xFF3949AB),
+              Color(0xFF5C6BC0),
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: FadeTransition(
+                opacity: _fadeAnimation,
+                child: SlideTransition(
+                  position: _slideAnimation,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _buildHeader(),
+                      const SizedBox(height: 40),
+                      _buildLoginCard(),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildWideLayout(BuildContext context) {
-    return Row(
+  Widget _buildHeader() {
+    return Column(
       children: [
-        Expanded(
-          flex: 1,
-          child: Container(
-            color: Colors.blue,
-            child: Center(
-              child: Text(
-                'Ex-Fuel Tracker',
-                style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                      color: Colors.white,
-                    ),
-              ),
-            ),
+        Container(
+          width: 80,
+          height: 80,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: const Icon(
+            Icons.local_gas_station_rounded,
+            size: 40,
+            color: Colors.white,
           ),
         ),
-        Expanded(
-          flex: 1,
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 400),
-              child: _buildLoginForm(),
-            ),
+        const SizedBox(height: 20),
+        const Text(
+          'Welcome Back',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 28,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 0.5,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Sign in to continue',
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.8),
+            fontSize: 16,
           ),
         ),
       ],
     );
   }
 
-  Widget _buildNarrowLayout(BuildContext context) {
-    return SingleChildScrollView(
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
+  Widget _buildLoginCard() {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.15),
+            blurRadius: 30,
+            offset: const Offset(0, 15),
+          ),
+        ],
+      ),
+      child: Form(
+        key: _formKey,
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const SizedBox(height: 48),
-            Text(
-              'Login',
-              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    color: Colors.blue,
-                    fontWeight: FontWeight.bold,
-                  ),
-              textAlign: TextAlign.left,
+            _buildTextField(
+              controller: _emailController,
+              label: 'Email',
+              hint: 'Enter your email',
+              icon: Icons.email_outlined,
+              validator: _validateEmail,
+              keyboardType: TextInputType.emailAddress,
             ),
-            const SizedBox(height: 5),
-            const Image(
-              image: AssetImage('images/L1.png'),
-              width: 200,
-              height: 400,
-            ),
-            const SizedBox(height: 10),
-            _buildLoginForm(),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildLoginForm() {
-    return Form(
-      key: _formKey,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _buildTextField(
-            controller: _emailController,
-            label: 'Email',
-            validator: _validateEmail,
-            keyboardType: TextInputType.emailAddress,
-          ),
-          const SizedBox(height: 16),
-          _buildTextField(
-            controller: _passwordController,
-            label: 'Password',
-            validator: _validatePassword,
-            obscureText: _obscurePassword,
-            suffixIcon: IconButton(
-              icon: Icon(_obscurePassword ? Icons.visibility : Icons.visibility_off),
-              onPressed: () {
-                setState(() {
-                  _obscurePassword = !_obscurePassword;
-                });
-              },
-            ),
-          ),
-          const SizedBox(height: 30),
-          _isLoading
-              ? const Center(child: CircularProgressIndicator())
-              : ElevatedButton(
-                  onPressed: _onLogin,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                  child: const Text(
-                    'Login',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
-                  ),
+            const SizedBox(height: 20),
+            _buildTextField(
+              controller: _passwordController,
+              label: 'Password',
+              hint: 'Enter your password',
+              icon: Icons.lock_outline,
+              validator: _validatePassword,
+              obscureText: _obscurePassword,
+              suffixIcon: IconButton(
+                icon: Icon(
+                  _obscurePassword
+                      ? Icons.visibility_outlined
+                      : Icons.visibility_off_outlined,
+                  color: const Color(0xFF3949AB),
                 ),
-          if (isCachedLoginUsed)
-            const Padding(
-              padding: EdgeInsets.only(top: 16.0),
-              child: Text(
-                'Logged in using cached credentials.',
-                style: TextStyle(color: Colors.orange, fontStyle: FontStyle.italic),
-                textAlign: TextAlign.center,
+                onPressed: () {
+                  setState(() {
+                    _obscurePassword = !_obscurePassword;
+                  });
+                },
               ),
             ),
-        ],
+            const SizedBox(height: 32),
+            _buildLoginButton(),
+            if (isCachedLoginUsed)
+              Padding(
+                padding: const EdgeInsets.only(top: 16.0),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.orange.shade200),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.info_outline,
+                        size: 18,
+                        color: Colors.orange.shade700,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Using cached credentials',
+                        style: TextStyle(
+                          color: Colors.orange.shade700,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -292,29 +358,113 @@ class LoginPageState extends State<LoginPage> {
   Widget _buildTextField({
     required TextEditingController controller,
     required String label,
+    required String hint,
+    required IconData icon,
     required String? Function(String?) validator,
     bool obscureText = false,
     TextInputType? keyboardType,
     Widget? suffixIcon,
   }) {
-    return TextFormField(
-      controller: controller,
-      decoration: InputDecoration(
-        labelText: label,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: Colors.grey),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: Color(0xFF1A237E),
+            fontWeight: FontWeight.w600,
+            fontSize: 14,
+          ),
         ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: Colors.grey, width: 2),
+        const SizedBox(height: 8),
+        TextFormField(
+          controller: controller,
+          decoration: InputDecoration(
+            hintText: hint,
+            hintStyle: TextStyle(
+              color: Colors.grey.shade400,
+              fontSize: 14,
+            ),
+            prefixIcon: Icon(
+              icon,
+              color: const Color(0xFF3949AB),
+              size: 22,
+            ),
+            suffixIcon: suffixIcon,
+            filled: true,
+            fillColor: const Color(0xFFF5F6FA),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide.none,
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(
+                color: Color(0xFF3949AB),
+                width: 2,
+              ),
+            ),
+            errorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide(
+                color: Colors.red.shade300,
+                width: 1,
+              ),
+            ),
+            focusedErrorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide(
+                color: Colors.red.shade300,
+                width: 2,
+              ),
+            ),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 16,
+            ),
+          ),
+          validator: validator,
+          obscureText: obscureText,
+          keyboardType: keyboardType,
+          style: const TextStyle(
+            fontSize: 15,
+            color: Color(0xFF1A237E),
+          ),
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        suffixIcon: suffixIcon,
-      ),
-      validator: validator,
-      obscureText: obscureText,
-      keyboardType: keyboardType,
+      ],
+    );
+  }
+
+  Widget _buildLoginButton() {
+    return SizedBox(
+      height: 56,
+      child: _isLoading
+          ? Center(
+              child: CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  const Color(0xFF3949AB),
+                ),
+              ),
+            )
+          : ElevatedButton(
+              onPressed: _onLogin,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF3949AB),
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              child: const Text(
+                'Sign In',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ),
     );
   }
 
