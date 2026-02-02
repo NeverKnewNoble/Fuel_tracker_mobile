@@ -9,6 +9,9 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
+  final TextEditingController _tankerController = TextEditingController();
+  final TextEditingController _siteController = TextEditingController();
+
   String? selectedDefaultTanker;
   String? selectedDefaultSite;
 
@@ -21,6 +24,13 @@ class _SettingsPageState extends State<SettingsPage> {
   void initState() {
     super.initState();
     _loadData();
+  }
+
+  @override
+  void dispose() {
+    _tankerController.dispose();
+    _siteController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadData() async {
@@ -40,6 +50,12 @@ class _SettingsPageState extends State<SettingsPage> {
         sites = cachedSites;
         selectedDefaultTanker = defaultTanker;
         selectedDefaultSite = defaultSite;
+        if (defaultTanker != null) {
+          _tankerController.text = defaultTanker;
+        }
+        if (defaultSite != null) {
+          _siteController.text = defaultSite;
+        }
         _isLoading = false;
       });
     }
@@ -47,7 +63,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _saveDefaultTanker(String? value) async {
     final prefs = await SharedPreferences.getInstance();
-    if (value != null) {
+    if (value != null && value.isNotEmpty) {
       await prefs.setString('defaultFuelTanker', value);
     } else {
       await prefs.remove('defaultFuelTanker');
@@ -59,7 +75,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _saveDefaultSite(String? value) async {
     final prefs = await SharedPreferences.getInstance();
-    if (value != null) {
+    if (value != null && value.isNotEmpty) {
       await prefs.setString('defaultSite', value);
     } else {
       await prefs.remove('defaultSite');
@@ -178,22 +194,36 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ),
           const SizedBox(height: 24),
-          _buildDropdownCard(
+          _buildAutocompleteCard(
             label: 'Default Fuel Tanker',
-            hint: 'Select a default tanker',
+            hint: 'Type to search tankers...',
             icon: Icons.local_shipping_outlined,
-            value: selectedDefaultTanker,
+            controller: _tankerController,
             items: fuelTankers,
-            onChanged: _saveDefaultTanker,
+            onSelected: (value) {
+              _tankerController.text = value;
+              _saveDefaultTanker(value);
+            },
+            onCleared: () {
+              _tankerController.clear();
+              _saveDefaultTanker(null);
+            },
           ),
           const SizedBox(height: 16),
-          _buildDropdownCard(
+          _buildAutocompleteCard(
             label: 'Default Site',
-            hint: 'Select a default site',
+            hint: 'Type to search sites...',
             icon: Icons.location_on_outlined,
-            value: selectedDefaultSite,
+            controller: _siteController,
             items: sites,
-            onChanged: _saveDefaultSite,
+            onSelected: (value) {
+              _siteController.text = value;
+              _saveDefaultSite(value);
+            },
+            onCleared: () {
+              _siteController.clear();
+              _saveDefaultSite(null);
+            },
           ),
           const SizedBox(height: 32),
           if (fuelTankers.isEmpty && sites.isEmpty)
@@ -227,13 +257,14 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget _buildDropdownCard({
+  Widget _buildAutocompleteCard({
     required String label,
     required String hint,
     required IconData icon,
-    required String? value,
+    required TextEditingController controller,
     required List<String> items,
-    required void Function(String?) onChanged,
+    required void Function(String) onSelected,
+    required VoidCallback onCleared,
   }) {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -273,46 +304,102 @@ class _SettingsPageState extends State<SettingsPage> {
             ],
           ),
           const SizedBox(height: 16),
-          DropdownButtonFormField<String>(
-            initialValue: value,
-            decoration: InputDecoration(
-              hintText: hint,
-              hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
-              filled: true,
-              fillColor: const Color(0xFFF5F6FA),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
-              ),
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            ),
-            dropdownColor: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            items: [
-              DropdownMenuItem<String>(
-                value: null,
-                child: Text(
-                  'None',
-                  style: TextStyle(
-                    color: Colors.grey.shade500,
-                    fontSize: 15,
+          Autocomplete<String>(
+            optionsBuilder: (TextEditingValue textEditingValue) {
+              if (textEditingValue.text.isEmpty) {
+                return items;
+              }
+              return items.where((item) =>
+                  item.toLowerCase().contains(textEditingValue.text.toLowerCase()));
+            },
+            onSelected: onSelected,
+            fieldViewBuilder: (context, textController, focusNode, onFieldSubmitted) {
+              // Sync with external controller
+              if (controller.text.isNotEmpty && textController.text.isEmpty) {
+                textController.text = controller.text;
+              }
+              return TextField(
+                controller: textController,
+                focusNode: focusNode,
+                decoration: InputDecoration(
+                  hintText: hint,
+                  hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
+                  suffixIcon: textController.text.isNotEmpty
+                      ? IconButton(
+                          icon: Icon(Icons.clear, color: Colors.grey.shade400, size: 20),
+                          onPressed: () {
+                            textController.clear();
+                            onCleared();
+                          },
+                        )
+                      : null,
+                  filled: true,
+                  fillColor: const Color(0xFFF5F6FA),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Color(0xFF3949AB), width: 2),
+                  ),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                ),
+                style: const TextStyle(fontSize: 15, color: Color(0xFF1A237E)),
+                onChanged: (value) {
+                  setState(() {});
+                },
+              );
+            },
+            optionsViewBuilder: (context, onSelected, options) {
+              return Align(
+                alignment: Alignment.topLeft,
+                child: Material(
+                  elevation: 4,
+                  borderRadius: BorderRadius.circular(12),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: 200,
+                      maxWidth: MediaQuery.of(context).size.width - 72,
+                    ),
+                    child: ListView.builder(
+                      padding: EdgeInsets.zero,
+                      shrinkWrap: true,
+                      itemCount: options.length,
+                      itemBuilder: (context, index) {
+                        final option = options.elementAt(index);
+                        return InkWell(
+                          onTap: () => onSelected(option),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 14,
+                            ),
+                            decoration: BoxDecoration(
+                              border: index < options.length - 1
+                                  ? Border(
+                                      bottom: BorderSide(
+                                        color: Colors.grey.shade200,
+                                      ),
+                                    )
+                                  : null,
+                            ),
+                            child: Text(
+                              option,
+                              style: const TextStyle(
+                                color: Color(0xFF1A237E),
+                                fontSize: 15,
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
                   ),
                 ),
-              ),
-              ...items.map((item) => DropdownMenuItem(
-                    value: item,
-                    child: Text(
-                      item,
-                      style: const TextStyle(
-                        color: Color(0xFF1A237E),
-                        fontSize: 15,
-                      ),
-                    ),
-                  )),
-            ],
-            onChanged: onChanged,
-            style: const TextStyle(fontSize: 15, color: Color(0xFF1A237E)),
+              );
+            },
           ),
         ],
       ),
@@ -323,6 +410,8 @@ class _SettingsPageState extends State<SettingsPage> {
     return Center(
       child: TextButton.icon(
         onPressed: () async {
+          _tankerController.clear();
+          _siteController.clear();
           await _saveDefaultTanker(null);
           await _saveDefaultSite(null);
           if (mounted) {
