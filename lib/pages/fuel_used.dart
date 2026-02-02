@@ -17,12 +17,12 @@ class FuelUsedPage extends StatefulWidget {
 class _FuelUsedPageState extends State<FuelUsedPage> {
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
   final TextEditingController _dateController = TextEditingController();
-  final TextEditingController fuelUsedController = TextEditingController();
-  final TextEditingController requisitionNumberController =
-      TextEditingController();
+  final TextEditingController fuelDispensedController = TextEditingController();
+  final TextEditingController requisitionNumberController = TextEditingController();
   final TextEditingController _fuelTankerController = TextEditingController();
   final TextEditingController _siteController = TextEditingController();
   final TextEditingController _resourceController = TextEditingController();
+  final TextEditingController _odometerController = TextEditingController();
 
   String? selectedFuelTanker;
   String? selectedResource;
@@ -32,14 +32,21 @@ class _FuelUsedPageState extends State<FuelUsedPage> {
   List<String> resources = [];
   List<String> sites = [];
 
+  // Map to store resource data with odometer readings
+  Map<String, double> _resourceOdometers = {};
+
+  // Previous odometer reading from selected resource
+  double _previousOdometer = 0.0;
+
   @override
   void dispose() {
     _dateController.dispose();
-    fuelUsedController.dispose();
+    fuelDispensedController.dispose();
     requisitionNumberController.dispose();
     _fuelTankerController.dispose();
     _siteController.dispose();
     _resourceController.dispose();
+    _odometerController.dispose();
     super.dispose();
   }
 
@@ -64,6 +71,9 @@ class _FuelUsedPageState extends State<FuelUsedPage> {
     // Load default settings
     final defaultTanker = prefs.getString('defaultFuelTanker');
     final defaultSite = prefs.getString('defaultSite');
+
+    // Load cached odometers
+    await _loadCachedOdometers();
 
     if (mounted) {
       setState(() {
@@ -95,11 +105,37 @@ class _FuelUsedPageState extends State<FuelUsedPage> {
     await prefs.setStringList(key, data);
   }
 
+  Future<void> _saveCachedOdometers(Map<String, double> odometers) async {
+    final prefs = await SharedPreferences.getInstance();
+    final jsonString = jsonEncode(odometers);
+    await prefs.setString('cachedResourceOdometers', jsonString);
+  }
+
+  Future<void> _loadCachedOdometers() async {
+    final prefs = await SharedPreferences.getInstance();
+    final jsonString = prefs.getString('cachedResourceOdometers');
+    if (jsonString != null) {
+      final Map<String, dynamic> decoded = jsonDecode(jsonString);
+      _resourceOdometers = decoded.map((key, value) => MapEntry(key, (value as num).toDouble()));
+    }
+  }
+
   Future<void> fetchFuelTankers() async {
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final apiKey = prefs.getString('cachedApiKey');
+      final apiSecret = prefs.getString('cachedApiSecret');
+
+      final String credentials = '$apiKey:$apiSecret';
+      final String encodedCredentials = base64Encode(utf8.encode(credentials));
+
       final response = await http.get(
         Uri.parse(
             '$baseUrl/api/v2/method/fuel_tracker.api.fuel_used.get_fuel_tankers'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Basic $encodedCredentials',
+        },
       ).timeout(const Duration(seconds: 15));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -154,13 +190,24 @@ class _FuelUsedPageState extends State<FuelUsedPage> {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final resourcesData = data['data']['data'];
+        final resourcesData = data['data']['data'] as List;
         final fetchedResources =
             List<String>.from(resourcesData.map((e) => e['item_name']));
+
+        // Store odometer readings for each resource
+        final Map<String, double> odometers = {};
+        for (var resource in resourcesData) {
+          final name = resource['item_name'] as String;
+          final odometer = (resource['custom_current_odometer'] ?? 0).toDouble();
+          odometers[name] = odometer;
+        }
+
         setState(() {
           resources = fetchedResources;
+          _resourceOdometers = odometers;
         });
         await _saveCachedData('cachedResources', fetchedResources);
+        await _saveCachedOdometers(odometers);
         if (kDebugMode) {
           print('Resources fetched: $resources');
         }
@@ -179,8 +226,19 @@ class _FuelUsedPageState extends State<FuelUsedPage> {
 
   Future<void> fetchSites() async {
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final apiKey = prefs.getString('cachedApiKey');
+      final apiSecret = prefs.getString('cachedApiSecret');
+
+      final String credentials = '$apiKey:$apiSecret';
+      final String encodedCredentials = base64Encode(utf8.encode(credentials));
+
       final response = await http.get(
         Uri.parse('$baseUrl/api/v2/method/fuel_tracker.api.fuel_used.get_site'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Basic $encodedCredentials',
+        },
       ).timeout(const Duration(seconds: 15));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -363,7 +421,10 @@ class _FuelUsedPageState extends State<FuelUsedPage> {
               controller: _resourceController,
               items: resources,
               onSelected: (value) {
-                setState(() => selectedResource = value);
+                setState(() {
+                  selectedResource = value;
+                  _previousOdometer = _resourceOdometers[value] ?? 0.0;
+                });
                 _resourceController.text = value;
               },
               validator: (value) {
@@ -376,15 +437,47 @@ class _FuelUsedPageState extends State<FuelUsedPage> {
                 return null;
               },
             ),
+            const SizedBox(height: 6),
+            Padding(
+              padding: const EdgeInsets.only(left: 4),
+              child: Text(
+                'Previous Odometer (KM): ${_previousOdometer.toStringAsFixed(0)} KM',
+                style: TextStyle(
+                  color: const Color.fromARGB(255, 247, 43, 43),
+                  fontSize: 12,
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            _buildTextField(
+              controller: _odometerController,
+              label: 'Current Odometer (KM)',
+              hint: 'Enter current odometer reading',
+              icon: Icons.speed_outlined,
+              keyboardType: TextInputType.number,
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return 'Please enter the odometer reading';
+                }
+                final currentOdometer = double.tryParse(value);
+                if (currentOdometer == null) {
+                  return 'Please enter a valid number';
+                }
+                if (currentOdometer < _previousOdometer) {
+                  return 'Cannot be less than previous (${_previousOdometer.toStringAsFixed(0)} KM)';
+                }
+                return null;
+              },
+            ),
             const SizedBox(height: 20),
             _buildTextField(
-              controller: fuelUsedController,
-              label: 'Fuel Used (LTS)',
-              hint: 'Enter fuel used in liters',
+              controller: fuelDispensedController,
+              label: 'Fuel Dispensed (LTS)',
+              hint: 'Enter fuel dispensed in liters',
               icon: Icons.local_gas_station_outlined,
               keyboardType: TextInputType.number,
               validator: (value) => value == null || value.isEmpty
-                  ? 'Please enter the fuel used'
+                  ? 'Please enter the fuel dispensed'
                   : null,
             ),
             const SizedBox(height: 20),
@@ -695,7 +788,8 @@ class _FuelUsedPageState extends State<FuelUsedPage> {
               'fuel_tanker': _fuelTankerController.text,
               'resource': _resourceController.text,
               'site': _siteController.text,
-              'fuel_used': fuelUsedController.text,
+              'current_odometer': _odometerController.text,
+              'fuel_used': fuelDispensedController.text,
               'requisition_number': requisitionNumberController.text,
               'status': 'Pending',
             };

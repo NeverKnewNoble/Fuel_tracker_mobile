@@ -39,10 +39,25 @@ Future<Map<String, dynamic>> verifyLogin(String email, String password) async {
           'api_secret': responseData['data']['api_secret'],
         };
       } else {
-        // Handle login failure (wrong credentials)
+        // Handle specific login failure cases
+        final String errorMessage = responseData['data']['message']?.toString().toLowerCase() ?? '';
+        String userMessage;
+        
+        if (errorMessage.contains('user not found') || errorMessage.contains('user does not exist') || errorMessage.contains('no user found')) {
+          userMessage = 'User not found in the system. Please check your email or register for an account.';
+        } else if (errorMessage.contains('incorrect password') || errorMessage.contains('wrong password') || errorMessage.contains('invalid password')) {
+          userMessage = 'Incorrect password. Please check your password and try again.';
+        } else if (errorMessage.contains('invalid email') || errorMessage.contains('incorrect email')) {
+          userMessage = 'Invalid email address. Please check your email and try again.';
+        } else if (errorMessage.contains('invalid credentials') || errorMessage.contains('authentication failed')) {
+          userMessage = 'Invalid email or password. Please check your credentials and try again.';
+        } else {
+          userMessage = responseData['data']['message'] ?? 'Invalid email or password';
+        }
+       
         return {
           'status': responseData['data']['status'],
-          'message': responseData['data']['message'] ?? 'Invalid email or password',
+          'message': userMessage,
         };
       }
     } else if (response.statusCode == 401 || response.statusCode == 403) {
