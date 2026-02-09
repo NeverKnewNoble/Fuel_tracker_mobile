@@ -11,7 +11,9 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  final bool openFuelForm;
+
+  const HomePage({super.key, this.openFuelForm = false});
 
   @override
   HomePageState createState() => HomePageState();
@@ -76,6 +78,21 @@ class HomePageState extends State<HomePage> with WidgetsBindingObserver, TickerP
 
     _loadDocuments();
     _loadDefaultSettings();
+
+    // If app restarted after being killed during camera use, auto-open fuel form
+    if (widget.openFuelForm) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        final newDocument = await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => const FuelUsedPage(documentName: ''),
+          ),
+        );
+        if (newDocument != null) {
+          _addNewDocument(newDocument);
+        }
+      });
+    }
   }
 
   @override
@@ -306,7 +323,9 @@ class HomePageState extends State<HomePage> with WidgetsBindingObserver, TickerP
               'fuel_tanker': doc['fuel_tanker']?.toString() ?? '',
               'resource': doc['resource']?.toString() ?? '',
               'site': doc['site']?.toString() ?? '',
-              'current_odometer': doc['odometer_km']?.toString() ?? '',
+              'odometer_km': doc['odometer_km']?.toString() ?? '',
+              'hours_copy': doc['hours_copy']?.toString() ?? '',
+              'resource_type': doc['resource_type']?.toString() ?? '',
               'fuel_used': doc['fuel_used']?.toString() ?? '',
               'requisition_number': doc['requisition_number']?.toString() ?? '',
               'status': 'Sent', // Server documents are always synced
@@ -363,9 +382,13 @@ class HomePageState extends State<HomePage> with WidgetsBindingObserver, TickerP
         'fuel_tanker': document['fuel_tanker'] ?? '',
         'resource': document['resource'] ?? '',
         'site': document['site'] ?? '',
-        'current_odometer': document['current_odometer'] ?? '',
+        'odometer_km': document['odometer_km'] ?? '',
+        'hours_copy': document['hours_copy'] ?? '',
+        'resource_type': document['resource_type'] ?? '',
         'fuel_used': document['fuel_used'] ?? '',
         'requisition_number': document['requisition_number'] ?? '',
+        'odometer_image': document['odometer_image'] ?? '',
+        'odometer_image_filename': document['odometer_image_filename'] ?? '',
         'status': 'Stored, please press sync icon',
       });
       documentCount++;
@@ -388,6 +411,33 @@ class HomePageState extends State<HomePage> with WidgetsBindingObserver, TickerP
       final String credentials = '$apiKey:$apiSecret';
       final String encodedCredentials = base64Encode(utf8.encode(credentials));
 
+      // Build the request payload
+      final Map<String, dynamic> payload = {
+        'date': document['date'] ?? '',
+        'fuel_tanker': document['fuel_tanker'] ?? '',
+        'resource': document['resource'] ?? '',
+        'site': document['site'] ?? '',
+        'odometer_km': double.tryParse(document['odometer_km'] ?? '') ?? 0,
+        'hours_copy': double.tryParse(document['hours_copy'] ?? '') ?? 0,
+        'fuel_used': double.tryParse(document['fuel_used'] ?? '') ?? 0,
+        'requisition_number': document['requisition_number'] ?? '',
+      };
+
+      // Include base64 image if available (already encoded in fuel_used.dart)
+      final base64Image = document['odometer_image'] ?? '';
+      if (base64Image.isNotEmpty) {
+        payload['odometer_image'] = base64Image;
+        payload['odometer_image_filename'] =
+            document['odometer_image_filename'] ?? 'odometer_photo.jpg';
+        if (kDebugMode) {
+          print('Image included: base64 length ${base64Image.length}');
+        }
+      } else {
+        if (kDebugMode) {
+          print('No image data in document');
+        }
+      }
+
       final url = Uri.parse(
           '$baseUrl/api/v2/method/fuel_tracker.api.fuel_used.fuel_used');
       final response = await http.post(
@@ -396,20 +446,31 @@ class HomePageState extends State<HomePage> with WidgetsBindingObserver, TickerP
           'Content-Type': 'application/json',
           'Authorization': 'Basic $encodedCredentials',
         },
-        body: jsonEncode({
-          'date': document['date'] ?? '',
-          'fuel_tanker': document['fuel_tanker'] ?? '',
-          'resource': document['resource'] ?? '',
-          'site': document['site'] ?? '',
-          'odometer_km': document['current_odometer'] ?? '',
-          'fuel_used': document['fuel_used'] ?? '',
-          'requisition_number': document['requisition_number'] ?? '',
-        }),
-      );
+        body: jsonEncode(payload),
+      ).timeout(const Duration(seconds: 30));
 
       if (kDebugMode) {
+        // Log payload without the image data to keep logs readable
+        final logPayload = Map<String, dynamic>.from(payload);
+        if (logPayload.containsKey('odometer_image')) {
+          logPayload['odometer_image'] = '<base64 image data>';
+        }
+        print('POST Request Body: ${jsonEncode(logPayload)}');
         print('Response Status Code: ${response.statusCode}');
         print('Response Body: ${response.body}');
+      }
+
+      if (mounted) {
+        final hasImage = payload.containsKey('odometer_image');
+        final imgLen = hasImage ? (payload['odometer_image'] as String).length : 0;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Image: ${hasImage ? "${(imgLen / 1024).toStringAsFixed(0)}KB sent" : "NOT included"} | Status: ${response.statusCode}',
+            ),
+            duration: const Duration(seconds: 5),
+          ),
+        );
       }
 
       if (response.statusCode == 200) {

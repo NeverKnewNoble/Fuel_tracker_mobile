@@ -3,7 +3,8 @@
     <application
         android:label="fuel_tracker"
         android:name="${applicationName}"
-        android:icon="@mipmap/launcher_icon">
+        android:icon="@mipmap/launcher_icon"
+        android:largeHeap="true">
         <activity
             android:name=".MainActivity"
             android:exported="true"

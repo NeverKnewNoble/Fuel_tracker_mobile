@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:fuel_tracker/frappe_API/config.dart';
 import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -32,11 +34,20 @@ class _FuelUsedPageState extends State<FuelUsedPage> {
   List<String> resources = [];
   List<String> sites = [];
 
-  // Map to store resource data with odometer readings
-  Map<String, double> _resourceOdometers = {};
+  // Map to store full resource data (type, odometer, hours)
+  Map<String, Map<String, dynamic>> _resourceData = {};
 
-  // Previous odometer reading from selected resource
+  // Selected resource info
+  String? _selectedResourceType;
   double _previousOdometer = 0.0;
+  double _previousHours = 0.0;
+
+  // Check if selected resource is equipment (uses hours) or truck (uses odometer)
+  bool get _usesHours => _selectedResourceType == 'Equipment';
+
+  // Image picker for odometer/hours photo
+  final ImagePicker _imagePicker = ImagePicker();
+  File? _odometerImage;
 
   @override
   void dispose() {
@@ -60,6 +71,8 @@ class _FuelUsedPageState extends State<FuelUsedPage> {
       fetchResources();
       fetchSites();
     });
+    // Recover image if the app was killed while camera was open
+    _retrieveLostImage();
   }
 
   Future<void> _loadCachedData() async {
@@ -72,8 +85,8 @@ class _FuelUsedPageState extends State<FuelUsedPage> {
     final defaultTanker = prefs.getString('defaultFuelTanker');
     final defaultSite = prefs.getString('defaultSite');
 
-    // Load cached odometers
-    await _loadCachedOdometers();
+    // Load cached resource data
+    await _loadCachedResourceData();
 
     if (mounted) {
       setState(() {
@@ -105,18 +118,140 @@ class _FuelUsedPageState extends State<FuelUsedPage> {
     await prefs.setStringList(key, data);
   }
 
-  Future<void> _saveCachedOdometers(Map<String, double> odometers) async {
+  Future<void> _saveCachedResourceData(Map<String, Map<String, dynamic>> data) async {
     final prefs = await SharedPreferences.getInstance();
-    final jsonString = jsonEncode(odometers);
-    await prefs.setString('cachedResourceOdometers', jsonString);
+    final jsonString = jsonEncode(data);
+    await prefs.setString('cachedResourceData', jsonString);
   }
 
-  Future<void> _loadCachedOdometers() async {
+  Future<void> _loadCachedResourceData() async {
     final prefs = await SharedPreferences.getInstance();
-    final jsonString = prefs.getString('cachedResourceOdometers');
+    final jsonString = prefs.getString('cachedResourceData');
     if (jsonString != null) {
       final Map<String, dynamic> decoded = jsonDecode(jsonString);
-      _resourceOdometers = decoded.map((key, value) => MapEntry(key, (value as num).toDouble()));
+      _resourceData = decoded.map((key, value) =>
+        MapEntry(key, Map<String, dynamic>.from(value as Map)));
+    }
+  }
+
+  /// Save form state before opening camera so it can be restored
+  /// if Android kills the app while the camera is in the foreground.
+  Future<void> _saveFormState() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('_formState_date', _dateController.text);
+    await prefs.setString('_formState_fuelTanker', _fuelTankerController.text);
+    await prefs.setString('_formState_site', _siteController.text);
+    await prefs.setString('_formState_resource', _resourceController.text);
+    await prefs.setString('_formState_odometer', _odometerController.text);
+    await prefs.setString('_formState_fuelDispensed', fuelDispensedController.text);
+    await prefs.setString('_formState_requisition', requisitionNumberController.text);
+    await prefs.setBool('_formState_cameraOpen', true);
+  }
+
+  /// Restore form state after activity recreation.
+  Future<void> _restoreFormState() async {
+    final prefs = await SharedPreferences.getInstance();
+    final wasCameraOpen = prefs.getBool('_formState_cameraOpen') ?? false;
+    if (!wasCameraOpen) return;
+
+    final date = prefs.getString('_formState_date');
+    final tanker = prefs.getString('_formState_fuelTanker');
+    final site = prefs.getString('_formState_site');
+    final resource = prefs.getString('_formState_resource');
+    final odometer = prefs.getString('_formState_odometer');
+    final fuel = prefs.getString('_formState_fuelDispensed');
+    final requisition = prefs.getString('_formState_requisition');
+
+    if (mounted) {
+      setState(() {
+        if (date != null && date.isNotEmpty) _dateController.text = date;
+        if (tanker != null && tanker.isNotEmpty) {
+          _fuelTankerController.text = tanker;
+          selectedFuelTanker = tanker;
+        }
+        if (site != null && site.isNotEmpty) {
+          _siteController.text = site;
+          selectedSite = site;
+        }
+        if (resource != null && resource.isNotEmpty) {
+          _resourceController.text = resource;
+          selectedResource = resource;
+          final data = _resourceData[resource];
+          if (data != null) {
+            _selectedResourceType = data['resource_type'] as String?;
+            _previousOdometer = data['current_odometer'] as double? ?? 0.0;
+            _previousHours = data['current_hours'] as double? ?? 0.0;
+          }
+        }
+        if (odometer != null && odometer.isNotEmpty) _odometerController.text = odometer;
+        if (fuel != null && fuel.isNotEmpty) fuelDispensedController.text = fuel;
+        if (requisition != null && requisition.isNotEmpty) requisitionNumberController.text = requisition;
+      });
+    }
+
+    // Clear the flag
+    await prefs.setBool('_formState_cameraOpen', false);
+  }
+
+  /// Recover a lost image after the OS killed the app while the camera was open.
+  Future<void> _retrieveLostImage() async {
+    try {
+      final LostDataResponse response = await _imagePicker.retrieveLostData();
+      if (response.isEmpty) return;
+
+      if (response.file != null) {
+        // Restore the form fields first
+        await _restoreFormState();
+        if (mounted) {
+          setState(() {
+            _odometerImage = File(response.file!.path);
+          });
+        }
+      } else if (response.exception != null) {
+        if (kDebugMode) {
+          print('Lost image error: ${response.exception}');
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('Error retrieving lost image: $e');
+      }
+    }
+  }
+
+  Future<void> _showImageSourcePicker() async {
+    try {
+      // Save form state before launching in case Android kills the app
+      await _saveFormState();
+
+      final XFile? image = await _imagePicker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 50,
+        maxWidth: 800,
+        maxHeight: 800,
+      );
+
+      // Clear the camera-open flag since we returned normally
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('_formState_cameraOpen', false);
+
+      if (image != null) {
+        setState(() {
+          _odometerImage = File(image.path);
+        });
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('Error picking image: $e');
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to capture image. Please try again.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -192,24 +327,29 @@ class _FuelUsedPageState extends State<FuelUsedPage> {
         final data = jsonDecode(response.body);
         final resourcesData = data['data']['data'] as List;
         final fetchedResources =
-            List<String>.from(resourcesData.map((e) => e['item_name']));
+            List<String>.from(resourcesData.map((e) => e['name']));
 
-        // Store odometer readings for each resource
-        final Map<String, double> odometers = {};
+        // Store full resource data (type, odometer, hours)
+        final Map<String, Map<String, dynamic>> resourceDataMap = {};
         for (var resource in resourcesData) {
-          final name = resource['item_name'] as String;
-          final odometer = (resource['custom_current_odometer'] ?? 0).toDouble();
-          odometers[name] = odometer;
+          final name = resource['name'] as String;
+          resourceDataMap[name] = {
+            'resource_type': resource['resource_type'] ?? '',
+            'current_odometer': (resource['current_odometer'] ?? 0).toDouble(),
+            'current_hours': (resource['current_hours'] ?? 0).toDouble(),
+            'reg_no': resource['reg_no'] ?? '',
+          };
         }
 
         setState(() {
           resources = fetchedResources;
-          _resourceOdometers = odometers;
+          _resourceData = resourceDataMap;
         });
         await _saveCachedData('cachedResources', fetchedResources);
-        await _saveCachedOdometers(odometers);
+        await _saveCachedResourceData(resourceDataMap);
         if (kDebugMode) {
           print('Resources fetched: $resources');
+          print('Resource data: $_resourceData');
         }
       } else {
         if (kDebugMode) {
@@ -423,7 +563,18 @@ class _FuelUsedPageState extends State<FuelUsedPage> {
               onSelected: (value) {
                 setState(() {
                   selectedResource = value;
-                  _previousOdometer = _resourceOdometers[value] ?? 0.0;
+                  final data = _resourceData[value];
+                  if (data != null) {
+                    _selectedResourceType = data['resource_type'] as String?;
+                    _previousOdometer = data['current_odometer'] as double? ?? 0.0;
+                    _previousHours = data['current_hours'] as double? ?? 0.0;
+                  } else {
+                    _selectedResourceType = null;
+                    _previousOdometer = 0.0;
+                    _previousHours = 0.0;
+                  }
+                  // Clear the input when switching resources
+                  _odometerController.clear();
                 });
                 _resourceController.text = value;
               },
@@ -438,37 +589,51 @@ class _FuelUsedPageState extends State<FuelUsedPage> {
               },
             ),
             const SizedBox(height: 6),
-            Padding(
-              padding: const EdgeInsets.only(left: 4),
-              child: Text(
-                'Previous Odometer (KM): ${_previousOdometer.toStringAsFixed(0)} KM',
-                style: TextStyle(
-                  color: const Color.fromARGB(255, 247, 43, 43),
-                  fontSize: 12,
+            // Show previous odometer or hours based on resource type
+            if (selectedResource != null)
+              Padding(
+                padding: const EdgeInsets.only(left: 4),
+                child: Text(
+                  _usesHours
+                      ? 'Previous Hours: ${_previousHours.toStringAsFixed(1)} Hrs'
+                      : 'Previous Odometer: ${_previousOdometer.toStringAsFixed(0)} KM',
+                  style: const TextStyle(
+                    color: Color.fromARGB(255, 247, 43, 43),
+                    fontSize: 12,
+                  ),
                 ),
               ),
-            ),
             const SizedBox(height: 14),
             _buildTextField(
               controller: _odometerController,
-              label: 'Current Odometer (KM)',
-              hint: 'Enter current odometer reading',
-              icon: Icons.speed_outlined,
-              keyboardType: TextInputType.number,
+              label: _usesHours ? 'Current Hours' : 'Current Odometer (KM)',
+              hint: _usesHours ? 'Enter current hours reading' : 'Enter current odometer reading',
+              icon: _usesHours ? Icons.access_time_outlined : Icons.speed_outlined,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
               validator: (value) {
                 if (value == null || value.isEmpty) {
-                  return 'Please enter the odometer reading';
+                  return _usesHours
+                      ? 'Please enter the hours reading'
+                      : 'Please enter the odometer reading';
                 }
-                final currentOdometer = double.tryParse(value);
-                if (currentOdometer == null) {
+                final currentValue = double.tryParse(value);
+                if (currentValue == null) {
                   return 'Please enter a valid number';
                 }
-                if (currentOdometer < _previousOdometer) {
-                  return 'Cannot be less than previous (${_previousOdometer.toStringAsFixed(0)} KM)';
+                if (_usesHours) {
+                  if (currentValue < _previousHours) {
+                    return 'Cannot be less than previous (${_previousHours.toStringAsFixed(1)} Hrs)';
+                  }
+                } else {
+                  if (currentValue < _previousOdometer) {
+                    return 'Cannot be less than previous (${_previousOdometer.toStringAsFixed(0)} KM)';
+                  }
                 }
                 return null;
               },
             ),
+            const SizedBox(height: 20),
+            _buildImageCaptureField(),
             const SizedBox(height: 20),
             _buildTextField(
               controller: fuelDispensedController,
@@ -772,13 +937,156 @@ class _FuelUsedPageState extends State<FuelUsedPage> {
     );
   }
 
+  Widget _buildImageCaptureField() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          _usesHours ? 'Hours Meter Photo' : 'Odometer Photo',
+          style: const TextStyle(
+            color: Color(0xFF1A237E),
+            fontWeight: FontWeight.w600,
+            fontSize: 14,
+          ),
+        ),
+        const SizedBox(height: 8),
+        GestureDetector(
+          onTap: _showImageSourcePicker,
+          child: Container(
+            width: double.infinity,
+            height: _odometerImage != null ? 200 : 120,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: Colors.grey.shade200,
+                width: 1,
+              ),
+            ),
+            child: _odometerImage != null
+                ? Stack(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(14),
+                        child: Image.file(
+                          _odometerImage!,
+                          width: double.infinity,
+                          height: 200,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                      Positioned(
+                        top: 8,
+                        right: 8,
+                        child: Row(
+                          children: [
+                            // Retake button
+                            GestureDetector(
+                              onTap: _showImageSourcePicker,
+                              child: Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF3949AB),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Icon(
+                                  Icons.camera_alt,
+                                  color: Colors.white,
+                                  size: 20,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            // Remove button
+                            GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  _odometerImage = null;
+                                });
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: Colors.red.shade400,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Icon(
+                                  Icons.close,
+                                  color: Colors.white,
+                                  size: 20,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  )
+                : Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.camera_alt_outlined,
+                        size: 40,
+                        color: Colors.grey.shade400,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _usesHours
+                            ? 'Tap to take photo of hours meter'
+                            : 'Tap to take photo of odometer',
+                        style: TextStyle(
+                          color: Colors.grey.shade500,
+                          fontSize: 14,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '(Required)',
+                        style: TextStyle(
+                          color: Colors.red.shade300,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildSubmitButton() {
     return SizedBox(
       width: double.infinity,
       height: 56,
       child: ElevatedButton(
-        onPressed: () {
+        onPressed: () async {
           if (_formKey.currentState?.validate() ?? false) {
+            // Check if image was captured
+            if (_odometerImage == null) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    _usesHours
+                        ? 'Please take a photo of the hours meter'
+                        : 'Please take a photo of the odometer',
+                  ),
+                  backgroundColor: Colors.red,
+                ),
+              );
+              return;
+            }
+
+            // Encode image to base64 now while the file definitely exists
+            String base64Image = '';
+            String imageFilename = '';
+            if (_odometerImage != null && _odometerImage!.existsSync()) {
+              final imageBytes = await _odometerImage!.readAsBytes();
+              base64Image = base64Encode(imageBytes);
+              imageFilename = _odometerImage!.path.split('/').last;
+            }
+
             // Generate a temporary ID - real name comes from Frappe after sync
             final tempId = _generateTempId();
 
@@ -788,12 +1096,17 @@ class _FuelUsedPageState extends State<FuelUsedPage> {
               'fuel_tanker': _fuelTankerController.text,
               'resource': _resourceController.text,
               'site': _siteController.text,
-              'current_odometer': _odometerController.text,
+              'resource_type': _selectedResourceType ?? '',
+              'odometer_km': _usesHours ? '' : _odometerController.text,
+              'hours_copy': _usesHours ? _odometerController.text : '',
               'fuel_used': fuelDispensedController.text,
               'requisition_number': requisitionNumberController.text,
+              'odometer_image': base64Image,
+              'odometer_image_filename': imageFilename,
               'status': 'Pending',
             };
 
+            if (!mounted) return;
             // Don't call createFuelUsedDocument here - home.dart will handle syncing
             Navigator.pop(context, newDocument);
           }
