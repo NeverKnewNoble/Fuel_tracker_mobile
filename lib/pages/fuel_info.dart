@@ -23,8 +23,11 @@ class _FuelInfoPageState extends State<FuelInfoPage> {
   final TextEditingController fuelTankerController = TextEditingController();
   final TextEditingController resourceController = TextEditingController();
   final TextEditingController siteController = TextEditingController();
+  final TextEditingController odometerController = TextEditingController();
+  final TextEditingController hoursController = TextEditingController();
 
   bool _isLoading = true;
+  String _resourceType = '';
 
   @override
   void initState() {
@@ -92,6 +95,9 @@ class _FuelInfoPageState extends State<FuelInfoPage> {
     siteController.text = document['site'] ?? '';
     fuelUsedController.text = document['fuel_issued_lts']?.toString() ?? '';
     requisitionNumberController.text = document['requisition_number'] ?? '';
+    odometerController.text = document['odometer_km']?.toString() ?? '';
+    hoursController.text = document['hours_copy']?.toString() ?? '';
+    _resourceType = document['resource_type']?.toString() ?? '';
   }
 
   @override
@@ -229,6 +235,22 @@ class _FuelInfoPageState extends State<FuelInfoPage> {
               value: siteController.text,
             ),
             const SizedBox(height: 16),
+            // Show odometer or hours based on resource type
+            if (_resourceType == 'Equipment' && hoursController.text.isNotEmpty)
+              _buildInfoCard(
+                icon: Icons.access_time_outlined,
+                label: 'Hours',
+                value: hoursController.text,
+              )
+            else if (odometerController.text.isNotEmpty)
+              _buildInfoCard(
+                icon: Icons.speed_outlined,
+                label: 'Odometer (KM)',
+                value: odometerController.text,
+              ),
+            if ((_resourceType == 'Equipment' && hoursController.text.isNotEmpty) ||
+                odometerController.text.isNotEmpty)
+              const SizedBox(height: 16),
             _buildInfoCard(
               icon: Icons.local_gas_station_outlined,
               label: 'Fuel Used (LTS)',
